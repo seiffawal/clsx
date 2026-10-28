@@ -1,0 +1,70 @@
+name: Build clsx for Windows
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install MinGW-w64 toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc
+
+      - name: Compile clsx.exe
+        run: x86_64-w64-mingw32-gcc -O2 -Wall -Wextra -municode -static -o clsx.exe clsx.c -ladvapi32
+
+      - name: Verify executable exists
+        shell: pwsh
+        run: |
+          if (!(Test-Path .\clsx.exe)) { throw 'clsx.exe was not produced' }
+          Get-FileHash .\clsx.exe -Algorithm SHA256 | Format-List
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash .\clsx.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  clsx.exe" | Set-Content -Encoding ascii clsx.exe.sha256
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: clsx.exe
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: clsx-windows-x64
+          path: |
+            clsx.exe
+            clsx.exe.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish release assets for version tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            clsx.exe
+            clsx.exe.sha256
